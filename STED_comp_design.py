@@ -3,10 +3,10 @@ import numpy as np
 from dataclasses import dataclass
 from math import *
 from sys import *
-
+from Turbo_dataclass import *
 
 class Radial_comp:
-  def Turbo_design(self, Condition, Design, Stage):
+  def Turbo_design(self, Condition, Design):
     # Turbomachinery Boundary Condition
     Condition.Ho_in = CP.PropsSI("H","T",Condition.To_in,"P",Condition.Po_in, Condition.gas)
     Condition.So_in = CP.PropsSI("S","T",Condition.To_in,"P",Condition.Po_in, Condition.gas)
@@ -16,86 +16,106 @@ class Radial_comp:
     Design.total_P_ratio = Condition.Po_out / Condition.Po_in
     Design.stage_P_ratio = [Design.total_P_ratio**Design.ratio_fraction for i in range(Design.n_stage)]
     
-    # Check if Ca brings the static condition below saturation state
+    # Check if Ca brings the static condition below saturation Design
     (Check_Ts, Check_Ps) = Aux.stagnation_to_static(Condition.To_in, Condition.Po_in, Design.Ca, Condition.gas)
     Tsat_at_Check_Ps = CP.PropsSI("T","P",Check_Ps,"Q",1.0,Condition.gas)
     if Check_Ts < Tsat_at_Check_Ps:
       print("The inlet velocity too high to make static temperature under the saturation temperature")
-    
-    Design.Ca_max = 
-  
-  def radial_compressor_stage_design(self, Inputs, Stage):
-    Stage.Ts1 = Stage.Ts0
-    Stage.Ps1 = Stage.Ps0
-    Stage.Po10 = Stage.Po10_target
-    Stage.mdot = Stage.stage_in_mdot
-    
-    # Start: Inlet velocity calculation
-    Stage.impeller_in_mdot = Stage.mdot
-    Stage = self.inlet_velocity_triangle_unshrouded(Inputs, Stage)
-    
-    Stage.leak_mdot = Stage.impeller_in_mdot*Inputs.leak_mdot_fraction
-    Stage.beta2_guess = Inputs.beta2_method_value
-    
-    Stage.beta2i = Stage.beta2_guess
-    beta2_iter_quit = 0
-    while beta2_iter_quit =
-
-  def alpha2i_search_for_Po10(Inputs, Stage):
-  
-  def unshrouded_impeller(Inputs, Stage):
-    
-  
-  def inlet_velocity_triangle_unshrouded(self, Inputs, Stage):
-    Stage.rho1 = CP.PropsSI("D","T",Stage.Ts1,"P",Stage.Ps1,Inputs.gas)
-    temp_var = 
-  
-  def inlet_velocity_triangle_unshrouded_given_c(self, Inputs, Stage):
-    Stage.r1_hub = Inputs.impeller_inlet_radius_calculation_method_value
-    
-    # finite thickness blade design inputs
-    hth = Inputs.impeller_inlet_blade_hub_thickness
-    tth = Inputs.impeller_inlet_blade_tip_thickness
-    nfb = Inputs.n_full_blades
-    
-    # blade root capa check
-    root_circum = Stage.r1_hub*2*pi
-    if root_circum < nfb*hth:
-      exit('inlet hub radius is not enough to contain blades')
+      exit()
+    else:
+      SS = CP.PropsSI("A","P",Check_Ps,"T",Check_Ts,Condition.gas)
+      if Design.Ca > SS*0.9:
+        print("The inlet velocity is too close to the speed of sound")
+        exit()
       
-    Stage.Cm1 = Inputs.impeller_input_velocity_design_value
-    Stage.A1 = Stage.impeller_in_mdot / Stage.rho1 / Stage.Cm1
-    Stage.r1_tip = (hth*nfb + tth*nfb + 2*((hth**2*nfb**2)/4+(hth*nfb**2*tth)/2 - 2*pi*hth*nfb*Stage.r1_hub+(nfb**2*tth**2)/4 - 2*pi*nfb*Stage.r1_hub*tth + 4*pi**2*Stage.r1_hub**2+4*pi*Stage.A1)**0.5)/(4*pi)
+  
+  def radial_compressor_stage_design(self, Condition, Design, P_ratio, gas):
+    Stage = Def_Stage()
+    Stage.Ho1 = Condition.Ho_in
+    Stage.To1 = Condition.To_in
+    Stage.Po1 = Condition.Po_in
     
-    # Impeller tip inlet velocity triangle
-    Stage.U1_tip = Stage.omega*Stage.r1_tip
-    Stage.C1_tip = Stage.Cm1/cos(Stage.alpha1*pi/180)
-    Stage.Cw1_tip = Stage.C1_tip*sin(Stage.alpha1*pi/180)
-    Stage.Ww1_tip = Stage.Cw1_tip - Stage.U1_tip
-    Stage.W1_tip = sqrt(Stage.Cm1**2+Stage.Ww1_tip**2)
-    Stage.beta1_tip = atan(Stage.Ww1_tip/Stage.Cm1)*180/pi
+    Stage.So1 = CP.PropsSI("S","T",Stage.To1,"P",Stage.Po1,gas)
+    Stage.Cr1 = Design.Ca 
+    Stage.C1 = Design.Cr1/cos(Design.alpha1*pi/180) # axial composition
+    Stage.Cw1 = Design.C1*sin(Design.alpha1*pi/180) # Whirl composition
     
-    Stage.r1 = sqrt((Stage.r1_tip**2+Stage.r1_hub**2)/2)
-    Stage.U1 = Stage.omega*Stage.r1
-    Stage.C1 = Stage.Cm1/cos(Stage.alpha1*pi/180)
-    Stage.Cw1 = Stage.C1*sin(Stage.alpha1*pi/180)
-    Stage.Ww1 = Stage.Cw1 - Stage.U1
-    Stage.W1 = sqrt(Stage.Cm1**2+Stage.Ww1**2)
-    Stage.beta1 = atan(Stage.Ww1/Stage.Cm1)*180/pi
     
-    Stage.U1_hub = Stage.omega*Stage.r1_hub
-    Stage.C1_hub = Stage.Cm1/cos(Stage.alpha1*pi/180)
-    Stage.Cw1_hub = Stage.C1_hub*sin(Stage.alpha1*pi/180)
-    Stage.Ww1_hub = Stage.Cw1_hub - Stage.U1_hub
-    Stage.W1_hub = sqrt(Stage.Cm1**2+Stage.Ww1_hub**2)
-    Stage.beta1_hub = atan(Stage.Ww1_hub/Stage.Cm1)*180/pi
+    (Stage.Ts1, Stage.Ps1) = Aux.stagnation_to_static(Stage.To1, Stage.Po1, gas)
+    Stage.rho1 = CP.PropsSI("D","T",Stage.To1,"P",Stage.Po1, gas)
     
-    (Stage.To, Stage.Po) = Aux.static_to_stagnation(Stage.Ts1, Stage.Ps1, Stage.C1, Inputs.gas)
-    Stage.Ho1 = CP.PropsSI("H","T",Stage.To1,"P",Stage.Po1,Inputs.gas)
-    Stage.Hs1 = CP.PropsSI("H","T",Stage.Ts1,"P",Stage.Ps1,Inputs.gas)
-    Stage.s1 = CP.PropsSI("S","T",Stage.To1,"P",Stage.Po1,Inputs.gas)
+    Stage.D1_tip = sqrt(Design.D1_root**2+4*Condition.mdot/(pi*Stage.rho1*Stage.Cr1))
+    Stage.D1 = (Design.D1_root+Design.D1_tip)/2
     
-    return Stage
+    Stage.U1 = Stage.D1/2*Condition.rpm/60*2*pi
+    Stage.U1_hub = Design.D1_root/2*Condition.rpm/60*2*pi
+    Stage.U1_tip = Stage.D1_tip/2*Condition.rpm/60*2*pi
+    
+    Stage.Ww1 = Stage.U1 - Stage.Cw1
+    Stage.W1_tip = sqrt(Stage.Cr1**2+(Stage.U1_tip-Stage.Cw1)**2)
+    Stage.W1_hub = sqrt(Stage.Cr1**2+(Stage.U1_hub-Stage.Cw1)**2)
+    
+    Stage.beta1 = 180/pi*atan((Stage.U1-Stage.Cw1)/Stage.Cr1)
+    Stage.beta1_hub = 180/pi*atan((Stage.U1_hub-Stage.Cw1)/Stage.Cr1)
+    Stage.beta1_tip = 180/pi*atan((Stage.U1_tip-Stage.Cw1)/Stage.Cr1)
+    
+    Stage.Slip_Factor = 1-sqrt(cos(Design.BackSwept_beta*pi/180))/Design.n_vane**0.7
+    
+    # Initial Assumption of Impeller outlet
+    Stage.Po2 = Stage.Po1*P_ratio
+    Stage.Ho2_ideal = CP.PropsSI("H","P",Stage.Po2,"S",Stage.So1,gas)
+    Stage.Ho2 = Stage.Ho2_ideal  
+    Stage.To2 = CP.PropsSI("T","H",Stage.Ho2, "P", Stage.Po2, gas)
+    
+    Stage.Cr2 = Design.Ca # Initial Assumption of outlet axial velocity
+    Stage.del_H = Stage.Ho2 - Stage.Ho1
+    
+    a = Stage.Slip_Factor
+    b = -Stage.Cr2*tan(Design.BackSwept_beta*pi/180)
+    c = -Stage.del_H-Stage.U1*Stage.Cw1
+    
+    Stage.U2 = (-b+sqrt(b**2-4*a*c))/2/a
+    Stage.Cw2 = Stage.U2 + Stage.Cw2*tan(Design.BackSwept_beta*pi/180) - Stage.U2*(1-Stage.Slip_Factor)
+    Stage.alpha2 = 180/pi*atan(Stage.Cw2/Stage.Cr2)
+    
+    Stage.Wr2 = Stage.Cr2
+    Stage.Ww2 = Stage.U2-Stage.Cw2
+    Stage.W2 = sqrt(Stage.Wr2**2+Stage.Ww2**2)
+    
+    (Stage.Ts2, Stage.Ps2) = Aux.stagnation_to_static(Stage.To2,Stage.Po2,Stage.C2,gas)
+    Stage.rho2 = CP.PropsSI("D","T",Stage.Ts2,"P",Stage.Ps2,gas)
+    Stage.mu2 = CP.PropsSI("V","T",Stage.Ts2,"P",Stage.Ps2,gas)
+    Stage.D2 = 2*Stage.U2/(2*pi*Condition.rpm/60)
+    Stage.Vane_depth = Condition.mdot/(Stage.rho2*Stage.Cr2)/(pi*Stage.D2) 
+    # Flow area = impeller exit circumference*Vane depth
+    
+    # Initial Assumption
+    Stage.To3 = Stage.To2
+    Stage.Po3 = Stage.Po2
+    
+    Stage.Diffuser_depth = Stage.Vane_depth*Design.bstar 
+    # bstar: ratio of inlet depth of vaneless diffuser to depth of impeller exit
+    Stage.D2i = Stage.D2*Design.imp_to_dif 
+    # imp_to_dif: ratio of diffuser inlet diameter to impeller exit diameter
+    # Stage.D2i: Diffuser inlet diameter
+    Stage.D3 = Stage.D2i*Design.dif_in_to_out
+    # dif_in_to_out: ratio of diffuer outlet diamter to inlet diameter
+    
+    # Initial assumption of diffuser velocity
+    Stage.Cr3 = Stage.Cr2/Design.ratio_dif_in_out
+    Stage.Cw3 = Stage.Cw2/Design.ratio_dif_in_out
+    Stage.C3 = sqrt(Stage.Cr3**2+Stage.Cw3**2)
+    (Stage.Ts3, Stage.Ps3) = Aux.stagnation_to_static(Stage.To3, Stage.Po3, Stage.C3, gas)
+    Stage.rho3 = CP.PropsSI("D","T",Stage.Ts3,"P",Stage.Ps3,gas)
+    
+    a = 1
+    while a:
+      Stage = radial_compressor_loss(Condition, Design, Stage)
+      
+  def radial_compressor_loss(self, Condition, Design, Stage):
+    f_inc = 0.7
+    
+    
 
 class Aux:
   @staticmethod
