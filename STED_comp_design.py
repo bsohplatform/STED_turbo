@@ -1,5 +1,6 @@
 import CoolProp.CoolProp as CP
 import numpy as np
+import pandas as pd
 from dataclasses import dataclass
 from math import *
 from sys import *
@@ -10,6 +11,14 @@ class Radial_comp:
     self.Condition = Condition
     self.Design = Design
     
+    self.com_diagram = pd.DataFrame({'ns': [0.163, 0.222, 0.318, 0.39, 0.475, 0.645],
+                                     'ds': [17, 12.1, 8.1, 6.55, 5.5, 4.05],
+                                    'eff': [50, 60, 70, 75, 80, 85]})
+    
+    self.tur_diagram = pd.DataFrame({'ns': [0.132, 0.205, 0.48, 0.545, 0.61, 0.81, 1],
+                                     'ds': [10.4, 7.8, 3.7, 3.45, 3.2, 2.7, 2.35],
+                                    'eff': [80, 90, 95, 90, 80, 70]})
+    
   def __call__(self):
     for n in range(self.Design.n_stage):
       if n == 0:
@@ -18,9 +27,45 @@ class Radial_comp:
         
         Stage = self.radial_compressor_convergence(self.Condition, self.Design, Stage)
         
-  def nsds_findinbg_com(Condition, Design):
-    Condition.
+  #def nsds_finding_com(Condition, Design):
+  #  Condition.
   
+  def nsds_conversion(self, Fluid_1, Fluid_2, rpm, d_impeller):
+    m_to_fit = 3.28084
+    kg_to_lb = 2.205
+    rho_conv = kg_to_lb/m_to_fit**3
+    g_en = 9.80665 * m_to_fit
+    
+    mdot_en = Fluid_1.m * kg_to_lb # kg to lb
+    omega = rpm/60*2*pi
+    
+    h_in = CP.PropsSI("H","T",Fluid_1.T,"P",Fluid_1.p,Fluid_1.fluid)
+    s_in = CP.PropsSI("S","T",Fluid_1.T,"P",Fluid_1.p,Fluid_1.fluid)
+    h_out = CP.PropsSI("H","T",Fluid_2.T,"P",Fluid_2.p,Fluid_2.fluid)
+    H_ad = (h_out-h_in) / g_en
+    vol_en = mdot_en/(CP.PropsSI("D","T",Fluid_1.T, "P", Fluid_1.p, Fluid_1.fluid)*rho_conv)
+    
+    ns = omega*sqrt(vol_en)/(H_ad*g_en)**(3/4)
+    dia = d_impeller * sqrt(vol_en) / ((H_ad*g_en)**0.25)
+    ds = dia / m_to_fit
+    tip = omega*dia/m_to_fit/2
+    
+    return ns, ds, tip, H_ad
+  
+  def nsds_diagram(self, type, ns):
+    self.com_diagram[self.com_diagram['ns'] > ns]
+    
+    if type == "c":
+      if ns < com_diagram[0,0]:
+        print("non-acceptable ns value")
+      elif ns > com_diagram[5,0]:
+        print("non-acceptable ns value")
+      else:
+        ns_father = 1
+        a = 1
+        while a:
+          ns_father = ns_father+1 
+      
   def Preprocess(self, Condition, Design):
     # Turbomachinery Boundary Condition
     Condition.Ho_in = CP.PropsSI("H","T",Condition.To_in,"P",Condition.Po_in, Condition.gas)
