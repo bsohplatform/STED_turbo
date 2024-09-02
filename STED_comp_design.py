@@ -17,20 +17,82 @@ class Radial_comp:
     
     self.tur_diagram = pd.DataFrame({'ns': [0.132, 0.205, 0.48, 0.545, 0.61, 0.81, 1],
                                      'ds': [10.4, 7.8, 3.7, 3.45, 3.2, 2.7, 2.35],
-                                    'eff': [80, 90, 95, 90, 80, 70]})
+                                    'eff': [70, 80, 90, 95, 90, 80, 70]})
     
   def __call__(self):
-    for n in range(self.Design.n_stage):
+    
+    gas = 'co2'
+    
+
+    # Compressor inlet, outlet conditions
+    in_t = 35+273.15
+    in_p = 8057.928
+    out_p = 25000
+    m_dot = 120.1183
+    
+    Fluid_in = Def_Condition()
+    Fluid_out = Def_Condition()
+    
+    Fluid_in.T = in_t
+    Fluid_in.p = in_p
+    Fluid_in.fluid = 'co2'
+    Fluid_in.m = m_dot
+    
+    Fluid_out.p = out_p
+    Fluid_out.fluid = 'co2'
+    Fluid_out.m = m_dot
+    
+    self.nsds_finding(Fluid_in, Fluid_out)
+
+    
+    
+    '''for n in range(self.Design.n_stage):
       if n == 0:
         self.Preprocess(self.Condition, self.Design)
         Stage = self.radial_compressor_design_initialization(self.Condition, self.Design, self.Design.P_ratio_vec[n])
+        Stage = self.radial_compressor_convergence(self.Condition, self.Design, Stage)'''
         
-        Stage = self.radial_compressor_convergence(self.Condition, self.Design, Stage)
         
   #def nsds_finding_com(Condition, Design):
   #  Condition.
-  
-  def nsds_conversion(self, Fluid_1, Fluid_2, rpm, d_impeller):
+  def nsds_finding(self, Fluid_1, Fluid_2):
+    ns_ub = 0.645
+    ns_lb = 0.163
+    a = 1
+    f = 0.001
+    n = 0
+    result_vec = []
+        
+    while a:
+      n = n+1
+      ns = 0.5*(ns_ub + ns_lb)
+      for i in range(2):
+        # optimization
+        if i == 0:
+          (ds0, eff0, err_code) = self.nsds_diagram(ns)
+        else:
+          (ds, eff, err_code) = self.nsds_diagram(ns*(1+f))
+          result_vec.append([ns, ds, eff])
+          deff = (eff-eff0)/ns/f
+          if deff > 0:
+            ns_lb = ns
+          else:
+            ns_ub = ns
+          
+          if len(result_vec) > 2:
+            if result_vec[-2][2] > result_vec[-1][2] and result_vec[-2][2] > result_vec[-3][2]:
+              tol = max(abs(result_vec[-3][2] - result_vec[-2][2]),abs(result_vec[-2][2]-result_vec[-1][2]))
+              if tol/result_vec[-2][2] < 1.0e-3:
+                a = 0
+                ns_result = result_vec[-2][0]
+                ds_result = result_vec[-2][1]
+                eff_result = result_vec[-2][2]
+                
+    return ns_result, ds_result, eff_result
+        
+        
+      
+  def nsds_conversion(self, Fluid_1, Fluid_2, rpm, ds):
     m_to_fit = 3.28084
     kg_to_lb = 2.205
     rho_conv = kg_to_lb/m_to_fit**3
@@ -46,25 +108,34 @@ class Radial_comp:
     vol_en = mdot_en/(CP.PropsSI("D","T",Fluid_1.T, "P", Fluid_1.p, Fluid_1.fluid)*rho_conv)
     
     ns = omega*sqrt(vol_en)/(H_ad*g_en)**(3/4)
-    dia = d_impeller * sqrt(vol_en) / ((H_ad*g_en)**0.25)
-    ds = dia / m_to_fit
-    tip = omega*dia/m_to_fit/2
+    dia_en = ds * sqrt(vol_en) / ((H_ad*g_en)**0.25)
+    dia = dia_en / m_to_fit
+    tip = omega*dia/2
     
-    return ns, ds, tip, H_ad
+    return ns, dia, tip, H_ad
   
-  def nsds_diagram(self, type, ns):
-    self.com_diagram[self.com_diagram['ns'] > ns]
-    
-    if type == "c":
-      if ns < com_diagram[0,0]:
-        print("non-acceptable ns value")
-      elif ns > com_diagram[5,0]:
-        print("non-acceptable ns value")
-      else:
-        ns_father = 1
-        a = 1
-        while a:
-          ns_father = ns_father+1 
+  def nsds_diagram(self, ns):
+    ns_data = self.com_diagram.ns
+    ds_data = self.com_diagram.ds
+    eff_data = self.com_diagram.eff
+    if ns < ns_data.iloc[0]:
+      ds = 3.8
+      eff = 80
+      err_code = 1
+    elif ns > ns_data.iloc[-1]:
+      ds = 3.8
+      eff = 80
+      err_code = 2
+    else:
+      err_code = 0
+      ns_lb_index = ns_data.loc[ns > ns_data].index[-1]
+      ns_ub_index = ns_lb_index+1
+      
+      interp_x = (ns - ns_data[ns_lb_index])/(ns_data[ns_ub_index]-ns_data[ns_lb_index])
+      ds = ds_data[ns_lb_index] + interp_x*(ds_data[ns_ub_index]-ds_data[ns_lb_index])
+      eff = eff_data[ns_lb_index] + interp_x*(eff_data[ns_ub_index]-eff_data[ns_lb_index])
+      
+    return ds, eff, err_code
       
   def Preprocess(self, Condition, Design):
     # Turbomachinery Boundary Condition
