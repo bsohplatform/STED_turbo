@@ -21,30 +21,32 @@ class Radial_comp:
     
   def __call__(self):
     
-    gas = 'co2'
+    gas = 'R245FA'
     
 
     # Compressor inlet, outlet conditions
-    in_t = 35+273.15
-    in_p = 8057.928
-    out_p = 25000
-    m_dot = 120.1183
+    in_t = 55+273.15 
+    in_p = 0.34*1.0e6
+    out_p = 1.0*1.0e6
+    m_dot = 5
     
     Fluid_in = Def_Condition()
     Fluid_out = Def_Condition()
     
     Fluid_in.T = in_t
     Fluid_in.p = in_p
-    Fluid_in.fluid = 'co2'
+    Fluid_in.fluid = gas
     Fluid_in.m = m_dot
     
     Fluid_out.p = out_p
-    Fluid_out.fluid = 'co2'
+    Fluid_out.fluid = gas
     Fluid_out.m = m_dot
     
-    self.nsds_finding(Fluid_in, Fluid_out)
-
+    ns = 0.645
     
+    (rpm_tune, dia_tune, tip_tune, ns_tune, ds_tune, H_ad) = self.nsds_conversion(Fluid_in, Fluid_out, ns)
+
+    a = 1
     
     '''for n in range(self.Design.n_stage):
       if n == 0:
@@ -54,65 +56,33 @@ class Radial_comp:
         
         
   #def nsds_finding_com(Condition, Design):
-  #  Condition.
-  def nsds_finding(self, Fluid_1, Fluid_2):
-    ns_ub = 0.645
-    ns_lb = 0.163
-    a = 1
-    f = 0.001
-    n = 0
-    result_vec = []
-        
-    while a:
-      n = n+1
-      ns = 0.5*(ns_ub + ns_lb)
-      for i in range(2):
-        # optimization
-        if i == 0:
-          (ds0, eff0, err_code) = self.nsds_diagram(ns)
-        else:
-          (ds, eff, err_code) = self.nsds_diagram(ns*(1+f))
-          result_vec.append([ns, ds, eff])
-          deff = (eff-eff0)/ns/f
-          if deff > 0:
-            ns_lb = ns
-          else:
-            ns_ub = ns
-          
-          if len(result_vec) > 2:
-            if result_vec[-2][2] > result_vec[-1][2] and result_vec[-2][2] > result_vec[-3][2]:
-              tol = max(abs(result_vec[-3][2] - result_vec[-2][2]),abs(result_vec[-2][2]-result_vec[-1][2]))
-              if tol/result_vec[-2][2] < 1.0e-3:
-                a = 0
-                ns_result = result_vec[-2][0]
-                ds_result = result_vec[-2][1]
-                eff_result = result_vec[-2][2]
-                
-    return ns_result, ds_result, eff_result
-        
-        
-      
-  def nsds_conversion(self, Fluid_1, Fluid_2, rpm, ds):
+  #  Condition.        
+  def nsds_conversion(self, Fluid_1, Fluid_2, ns):
     m_to_fit = 3.28084
     kg_to_lb = 2.205
     rho_conv = kg_to_lb/m_to_fit**3
     g_en = 9.80665 * m_to_fit
     
     mdot_en = Fluid_1.m * kg_to_lb # kg to lb
-    omega = rpm/60*2*pi
     
     h_in = CP.PropsSI("H","T",Fluid_1.T,"P",Fluid_1.p,Fluid_1.fluid)
     s_in = CP.PropsSI("S","T",Fluid_1.T,"P",Fluid_1.p,Fluid_1.fluid)
-    h_out = CP.PropsSI("H","T",Fluid_2.T,"P",Fluid_2.p,Fluid_2.fluid)
-    H_ad = (h_out-h_in) / g_en
+    h_out = CP.PropsSI("H","P",Fluid_2.p,"S",s_in,Fluid_2.fluid)
+    H_ad = (h_out-h_in) / (g_en/m_to_fit) * m_to_fit
     vol_en = mdot_en/(CP.PropsSI("D","T",Fluid_1.T, "P", Fluid_1.p, Fluid_1.fluid)*rho_conv)
     
-    ns = omega*sqrt(vol_en)/(H_ad*g_en)**(3/4)
-    dia_en = ds * sqrt(vol_en) / ((H_ad*g_en)**0.25)
-    dia = dia_en / m_to_fit
-    tip = omega*dia/2
+    omega = ns/sqrt(vol_en)*(H_ad*g_en)**(3/4)
+    rpm = omega*60/2/pi
     
-    return ns, dia, tip, H_ad
+    rpm_tune = rpm//60*60
+    omega_tune = rpm_tune/60*2*pi
+    ns_tune = omega_tune*sqrt(vol_en)/(H_ad*g_en)**(3/4)
+    (ds_tune, eff_tune, err_code) = self.nsds_diagram(ns_tune)
+    dia_en = ds_tune * sqrt(vol_en) / ((H_ad*g_en)**0.25)
+    dia_tune = dia_en / m_to_fit
+    tip_tune = omega_tune*dia_tune/2
+    
+    return rpm_tune, dia_tune, tip_tune, ns_tune, ds_tune, H_ad
   
   def nsds_diagram(self, ns):
     ns_data = self.com_diagram.ns
