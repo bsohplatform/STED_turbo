@@ -21,38 +21,31 @@ class Radial_comp:
     
   def __call__(self):
     
-    gas = 'R245FA'
-    
-
-    # Compressor inlet, outlet conditions
-    in_t = 55+273.15 
-    in_p = 0.34*1.0e6
-    out_p = 1.0*1.0e6
-    m_dot = 5
     
     Fluid_in = Def_Condition()
     Fluid_out = Def_Condition()
     
-    Fluid_in.T = in_t
-    Fluid_in.p = in_p
-    Fluid_in.fluid = gas
-    Fluid_in.m = m_dot
+    Fluid_in.T = self.Condition.To_in
+    Fluid_in.p = self.Condition.Po_in
+    Fluid_in.fluid = self.Condition.gas
+    Fluid_in.m = self.Condition.mdot
     
-    Fluid_out.p = out_p
-    Fluid_out.fluid = gas
-    Fluid_out.m = m_dot
+    Fluid_out.p = self.Condition.Po_out
+    Fluid_out.fluid = Fluid_in.fluid
+    Fluid_out.m = Fluid_in.m
     
     ns = 0.645
     
     (rpm_tune, dia_tune, tip_tune, ns_tune, ds_tune, H_ad) = self.nsds_conversion(Fluid_in, Fluid_out, ns)
-
+    
+    self.Condition.rpm = rpm_tune
     a = 1
     
-    '''for n in range(self.Design.n_stage):
+    for n in range(self.Design.n_stage):
       if n == 0:
         self.Preprocess(self.Condition, self.Design)
         Stage = self.radial_compressor_design_initialization(self.Condition, self.Design, self.Design.P_ratio_vec[n])
-        Stage = self.radial_compressor_convergence(self.Condition, self.Design, Stage)'''
+        Stage = self.radial_compressor_convergence(self.Condition, self.Design, Stage)
         
         
   #def nsds_finding_com(Condition, Design):
@@ -146,7 +139,7 @@ class Radial_comp:
     
     
     (Stage.Ts1, Stage.Ps1) = Aux.stagnation_to_static(Stage.To1, Stage.Po1, Stage.C1, Condition.gas)
-    Stage.rho1 = CP.PropsSI("D","T",Stage.To1,"P",Stage.Po1, Condition.gas)
+    Stage.rho1 = CP.PropsSI("D","T",Stage.Ts1,"P",Stage.Ps1, Condition.gas)
     
     Stage.D1_tip = sqrt(Design.D1_root**2+4*Condition.mdot/(pi*Stage.rho1*Stage.Cr1))
     Stage.D1 = (Design.D1_root+Stage.D1_tip)/2
@@ -253,7 +246,7 @@ class Radial_comp:
     c = -Stage.del_H-Stage.U1*Stage.Cw1
     
     Stage.U2 = (-b+sqrt(b**2-4*a*c))/2/a
-    Stage.Cw2 = Stage.U2 + Stage.Cr2*tan(Design.BackSwept_beta*pi/180) - Stage.U2*(1-Stage.Slip_Factor)
+    Stage.Cw2 = Stage.U2*Stage.Slip_Factor - Stage.Cr2*tan(Design.BackSwept_beta*pi/180)
     Stage.C2 = sqrt(Stage.Cw2**2+Stage.Cr2**2)
     Stage.alpha2 = 180/pi*atan(Stage.Cw2/Stage.Cr2)
     
@@ -371,20 +364,22 @@ class Radial_comp:
     
 class Aux:
   @staticmethod
-  def static_to_stagnation(Ts, Ps, v, gas, method="r"):
+  def static_to_stagnation(Ts, Ps, v, gas, method="h"):
     if method == "r":
-      Z = CP.PropsSI("Z","T",Ts, "P", Ps, gas)
+      f = 0.001
+      Z =  CP.PropsSI("Z","T",Ts, "P", Ps, gas)
       gamma = CP.PropsSI("Cpmass","T",Ts, "P", Ps, gas)/CP.PropsSI("Cvmass","T",Ts, "P", Ps, gas)
       SS = CP.PropsSI("A","T",Ts, "P", Ps, gas)
       mach = v/SS
-      dzdp = (CP.PropsSI("Z","T",Ts, "P", Ps*1.01, gas)-CP.PropsSI("Z","T",Ts, "P", Ps*0.99, gas))/(Ps*0.02)
-      dzdt = (CP.PropsSI("Z","T",Ts*1.01, "P", Ps, gas)-CP.PropsSI("Z","T",Ts*0.99, "P", Ps, gas))/(Ts*0.02)
+      dzdp = (CP.PropsSI("Z","T",Ts, "P", Ps*(1+f), gas)-CP.PropsSI("Z","T",Ts, "P", Ps*(1-f), gas))/(Ps*(2*f))
+      dzdt = (CP.PropsSI("Z","T",Ts*(1+f), "P", Ps, gas)-CP.PropsSI("Z","T",Ts*(1-f), "P", Ps, gas))/(Ts*(2*f))
       beta_T = 1/Ps-1/Z*(dzdp)
       beta_P = 1/Ts-1/Z*(dzdt)
       ns = gamma/beta_T/Ps
       ms = (gamma-1)/gamma*beta_T/beta_P*Ps/Ts
       Po = Ps*((1+(ns-1)/2*mach**2)**(ns/(ns-1)))
       To = Ts*((1+(ns-1)/2*mach**2)**(ms*ns/(ns-1)))
+    
     elif method == "i":
       gamma = CP.PropsSI("Cpmass","T",Ts, "P", Ps, gas)/CP.PropsSI("Cvmass","T",Ts, "P", Ps, gas)
       SS = CP.PropsSI("A","T",Ts, "P", Ps, gas)
@@ -392,47 +387,60 @@ class Aux:
       Po = Ps*((1+(gamma-1)/2*mach**2)**(gamma/(gamma-1)))
       To = Ts*(1+(gamma-1)/2*mach**2)
     
+    elif method == "h":
+      Hs = CP.PropsSI("H","T",Ts,"P",Ps,gas)
+      S = CP.PropsSI("S","T",Ts,"P",Ps,gas)
+      Ho = Hs+0.5*v**2
+      Po = CP.PropsSI("P","H",Ho,"S",S,gas)
+      To = CP.PropsSI("T","H",Ho,"S",S,gas)
+    
     return (To, Po)
 
   @staticmethod
-  def stagnation_to_static(To, Po, v, gas):
-    Ts = To*0.8
-    Ps = Po*0.8
-    a = 1
-    f = 0.01
-    n = 0
-    while a:
-      n = n+1
-      (To_0, Po_0) = Aux.static_to_stagnation(Ts, Ps, v, gas)
-      (To_1, Po_1) = Aux.static_to_stagnation(Ts*(1+f), Ps, v, gas)
-      (To_2, Po_2) = Aux.static_to_stagnation(Ts, Ps*(1+f), v, gas)
-      
-      dTodTs_Ps = (To_1-To_0)/(Ts*f)
-      dTodPs_Ts = (To_2-To_0)/(Ps*f)
-      dPodTs_Ps = (Po_1-Po_0)/(Ts*f)
-      dPodPs_Ts = (Po_2-Po_0)/(Ps*f)
-      
-      Terr = To_0-To
-      Perr = Po_0-Po
-      F = [Terr, Perr]
-      X = [Ts, Ps]
-      
-      
-      J = np.array([[dTodTs_Ps, dTodPs_Ts],[dPodTs_Ps, dPodPs_Ts]])
-      P = np.dot(np.linalg.inv(J),F)
-      
-      X_new = X-P
-      
-      err = max(abs(Terr)/To, abs(Perr)/Po)
-      if err < 1.0e-6:
-        a = 0
-      else:
-        if n < 100:
-          Ts = X_new[0]
-          Ps = X_new[1]
-        else:
-          a = 0
+  def stagnation_to_static(To, Po, v, gas, method = "h"):
+    if method == "n":
+      Ts = To*0.9
+      Ps = Po*0.9
+      a = 1
+      f = 0.01
+      n = 0
+      while a:
+        n = n+1
+        (To_0, Po_0) = Aux.static_to_stagnation(Ts, Ps, v, gas)
+        (To_1, Po_1) = Aux.static_to_stagnation(Ts*(1+f), Ps, v, gas)
+        (To_2, Po_2) = Aux.static_to_stagnation(Ts, Ps*(1+f), v, gas)
         
+        dTodTs_Ps = (To_1-To_0)/(Ts*f)
+        dTodPs_Ts = (To_2-To_0)/(Ps*f)
+        dPodTs_Ps = (Po_1-Po_0)/(Ts*f)
+        dPodPs_Ts = (Po_2-Po_0)/(Ps*f)
+        
+        Terr = To_0-To
+        Perr = Po_0-Po
+        F = [Terr, Perr]
+        X = [Ts, Ps]
+        
+        
+        J = np.array([[dTodTs_Ps, dTodPs_Ts],[dPodTs_Ps, dPodPs_Ts]])
+        P = np.dot(np.linalg.inv(J),F)
+        
+        X_new = X-P
+        
+        err = max(abs(Terr)/To, abs(Perr)/Po)
+        if err < 1.0e-6:
+          a = 0
+        else:
+          if n < 100:
+            Ts = X_new[0]
+            Ps = X_new[1]
+          else:
+            a = 0
+    elif method == "h":
+      Ho = CP.PropsSI("H","T",To,"P",Po,gas)
+      S = CP.PropsSI("S","T",To,"P",Po,gas)
+      Hs = Ho-0.5*v**2
+      Ps = CP.PropsSI("P","H",Hs,"S",S,gas)
+      Ts = CP.PropsSI("T","H",Hs,"S",S,gas)
     
     return(Ts, Ps)
     
@@ -440,24 +448,23 @@ if __name__ == '__main__':
   Condition = Def_Condition()
   Design = Def_Design()
   
-  Condition.gas = "air"
-  Condition.mdot = 10  # kg/sec
-  Condition.rpm = 50000  # rev/min
-  Condition.To_in = 30 + 273.15  # Inlet stagnation temperature (K)
-  Condition.Po_in = 0.1 * 1E6  # Inlet stagnation pressure (Pa)
-  Condition.Po_out = 0.3 * 1E6 # Outlet stagnation pressure (Pa)
+  Condition.gas = "R245fa"
+  Condition.mdot = 5  # kg/sec
+  Condition.To_in = 65 + 273.15  # Inlet stagnation temperature (K)
+  Condition.Po_in = 0.34 * 1E6  # Inlet stagnation pressure (Pa)
+  Condition.Po_out = 1.0 * 1E6 # Outlet stagnation pressure (Pa)
   
   # Specified Design values
   Design.P_ratio_vec = [Condition.Po_out/Condition.Po_in]
   Design.n_stage = 1  # number of stages
-  Design.Ca = 100 # Axial velocity(m/s)
-  Design.n_vane = 20  # number of vanes
+  Design.Ca = 50 # Axial velocity(m/s)
+  Design.n_vane = 10  # number of vanes
   
   (Ts, Ps) = Aux.stagnation_to_static(Condition.To_in, Condition.Po_in, Design.Ca, Condition.gas )
   Condition.rho_in = CP.PropsSI("D","T",Ts,"P",Ps,Condition.gas)
   
   Design.D1_root = sqrt(Condition.mdot/(Condition.rho_in*Design.Ca*pi/4*2.24)) # Impeller eye root diameter (m)
-  Design.Clearance = 0.000254*1.0 # Clearance (m)
+  Design.Clearance = 0.00354*1.0 # Clearance (m)
 
   # Loss model
   Design.Loss_incidence = 1
