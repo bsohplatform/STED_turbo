@@ -5,11 +5,13 @@ from dataclasses import dataclass
 from math import *
 from sys import *
 from Turbo_dataclass import *
+from copy import *
 
 class Radial_comp:
-  def __init__(self, Condition, Design):
+  def __init__(self, Condition, Design, Plot):
     self.Condition = Condition
     self.Design = Design
+    self.Plot = Plot
     
     self.com_diagram = pd.DataFrame({'ns': [0.163, 0.222, 0.318, 0.39, 0.475, 0.645],
                                      'ds': [17, 12.1, 8.1, 6.55, 5.5, 4.05],
@@ -24,6 +26,7 @@ class Radial_comp:
     
     Fluid_in = Def_Condition()
     Fluid_out = Def_Condition()
+    off_condition = Def_Condition()
     
     Fluid_in.T = self.Condition.To_in
     Fluid_in.p = self.Condition.Po_in
@@ -41,12 +44,21 @@ class Radial_comp:
     self.Condition.rpm = rpm_tune
     a = 1
     
+    mdot_list = [self.Plot.mdot_ratio_lb+(self.Plot.mdot_ratio_ub-self.Plot.mdot_ratio_lb)/self.Plot.mdot_num_range*n for n in range(self.Plot.mdot_num_range)]
+    rpm_list = [self.Plot.rpm_ratio_lb+(self.Plot.rpm_ratio_ub-self.Plot.rpm_ratio_lb)/self.Plot.rpm_num_range*n for n in range(self.Plot.rpm_num_range)]
+    
     for n in range(self.Design.n_stage):
       if n == 0:
         self.Preprocess(self.Condition, self.Design)
-        Stage = self.radial_compressor_design_initialization(self.Condition, self.Design, self.Design.P_ratio_vec[n])
-        Stage = self.radial_compressor_convergence(self.Condition, self.Design, Stage)
+        Stage, Geo = self.radial_compressor_design_initialization(self.Condition, self.Design, self.Design.P_ratio_vec[n])
+        Stage, Geo = self.radial_compressor_convergence(self.Condition, self.Design, Stage, Geo)
         
+        for rpm in rpm_list:
+          for mdot in mdot_list:
+            off_condition.rpm = rpm*self.Condition.rpm
+            off_condition.mdot = rpm*mdot*self.Condition.rpm
+            Stage, Geo
+
         
   #def nsds_finding_com(Condition, Design):
   #  Condition.        
@@ -127,6 +139,8 @@ class Radial_comp:
   
   def radial_compressor_design_initialization(self, Condition, Design, P_ratio):
     Stage = Def_Stage()
+    Geo = Def_Geo()
+    
     Stage.Ho1 = Condition.Ho_in
     Stage.To1 = Condition.To_in
     Stage.Po1 = Condition.Po_in
@@ -134,29 +148,14 @@ class Radial_comp:
     
     Stage.So1 = CP.PropsSI("S","T",Stage.To1,"P",Stage.Po1,Condition.gas)
     Stage.Cr1 = Design.Ca 
-    Stage.C1 = Stage.Cr1/cos(Design.alpha1*pi/180) # axial composition
-    Stage.Cw1 = Stage.C1*sin(Design.alpha1*pi/180) # Whirl composition
     
+    Stage, Geo = self.impeller_inlet_state_calculation(Condition, Design, Stage, Geo, Stage.Cr1, "design")
     
-    (Stage.Ts1, Stage.Ps1) = Aux.stagnation_to_static(Stage.To1, Stage.Po1, Stage.C1, Condition.gas)
-    Stage.rho1 = CP.PropsSI("D","T",Stage.Ts1,"P",Stage.Ps1, Condition.gas)
+    Geo.beta1 = 180/pi*atan((Stage.U1-Stage.Cw1)/Stage.Cr1)
+    Geo.beta1_hub = 180/pi*atan((Stage.U1_hub-Stage.Cw1)/Stage.Cr1)
+    Geo.beta1_tip = 180/pi*atan((Stage.U1_tip-Stage.Cw1)/Stage.Cr1)
     
-    Stage.D1_tip = sqrt(Design.D1_root**2+4*Condition.mdot/(pi*Stage.rho1*Stage.Cr1))
-    Stage.D1 = (Design.D1_root+Stage.D1_tip)/2
-    
-    Stage.U1 = Stage.D1/2*Condition.rpm/60*2*pi
-    Stage.U1_hub = Design.D1_root/2*Condition.rpm/60*2*pi
-    Stage.U1_tip = Stage.D1_tip/2*Condition.rpm/60*2*pi
-    
-    Stage.Ww1 = Stage.U1 - Stage.Cw1
-    Stage.W1_tip = sqrt(Stage.Cr1**2+(Stage.U1_tip-Stage.Cw1)**2)
-    Stage.W1_hub = sqrt(Stage.Cr1**2+(Stage.U1_hub-Stage.Cw1)**2)
-    
-    Stage.beta1 = 180/pi*atan((Stage.U1-Stage.Cw1)/Stage.Cr1)
-    Stage.beta1_hub = 180/pi*atan((Stage.U1_hub-Stage.Cw1)/Stage.Cr1)
-    Stage.beta1_tip = 180/pi*atan((Stage.U1_tip-Stage.Cw1)/Stage.Cr1)
-    
-    Stage.Slip_Factor = 1-sqrt(cos(Design.BackSwept_beta*pi/180))/Design.n_vane**0.7
+    Geo.Slip_Factor = 1-sqrt(cos(Design.BackSwept_beta*pi/180))/Design.n_vane**0.7
     
     # Initial Assumption of Impeller outlet
     Stage.Po2 = Stage.Po1*P_ratio
@@ -164,70 +163,65 @@ class Radial_comp:
     Stage.Ho2 = Stage.Ho2_ideal  
     Stage.To2 = CP.PropsSI("T","H",Stage.Ho2, "P", Stage.Po2, Condition.gas)
     
-    Stage = self.impeller_outlet_state_calculation(Condition, Design, Stage, Design.Ca)
+    Stage.Cr2 = Design.Ca
+    Stage, Geo = self.impeller_outlet_state_calculation(Condition, Design, Stage, Geo, Stage.Cr2, "design")
     
     # Initial Assumption
     Stage.To3 = Stage.To2
     Stage.Po3 = Stage.Po2
     
-    Stage.Diffuser_depth = Stage.Vane_depth*Design.bstar 
+    Geo.Diffuser_depth = Geo.Vane_depth*Design.bstar 
     # bstar: ratio of inlet depth of vaneless diffuser to depth of impeller exit
-    Stage.D2i = Stage.D2*Design.ratio_imp_dif 
+    Geo.D2i = Geo.D2*Design.ratio_imp_dif 
     # imp_to_dif: ratio of diffuser inlet diameter to impeller exit diameter
     # Stage.D2i: Diffuser inlet diameter
-    Stage.D3 = Stage.D2i*Design.ratio_dif_in_out
+    Geo.D3 = Geo.D2i*Design.ratio_dif_in_out
     # dif_in_to_out: ratio of diffuer outlet diamter to inlet diameter
     
     # Initial assumption of diffuser velocity
     Stage.Cr3 = Stage.Cr2/Design.ratio_dif_in_out
-    Stage.Cw3 = Stage.Cw2/Design.ratio_dif_in_out
-    Stage.C3 = sqrt(Stage.Cr3**2+Stage.Cw3**2)
-    (Stage.Ts3, Stage.Ps3) = Aux.stagnation_to_static(Stage.To3, Stage.Po3, Stage.C3, Condition.gas)
-    Stage.rho3 = CP.PropsSI("D","T",Stage.Ts3,"P",Stage.Ps3,Condition.gas)
+    Stage = self.diffuser_inlet_state_calculation(Condition, Design, Stage, Stage.Cr3)
     
-    return Stage
+    return Stage, Geo
   
-  def radial_compressor_convergence(self, Condition, Design, Stage):
+  def radial_compressor_convergence(self, Condition, Design, Stage, Geo):
     a = 1
     Cr2_iter = Stage.Cr2
     while a:
-      Stage = self.radial_compressor_loss(Condition, Design, Stage)
+      Stage = self.radial_compressor_loss(Condition, Design, Stage, Geo)
       Stage.Ho2 = Stage.Ho2_ideal+Stage.loss_external+Stage.loss_internal
       # Only pressure is affected by internal loss but the enthalpy is conserved
       # So only the internal loss is reflected when calculating pressure
       Stage.Po2 = CP.PropsSI("P","H",Stage.Ho2 - Stage.loss_internal,"S",Stage.So1,Condition.gas)
-      Stage.So2 = CP.PropsSI("S","H",Stage.Ho2, "P", Stage.Po2, Condition.gas)
       Stage.To2 = CP.PropsSI("T","H",Stage.Ho2, "P", Stage.Po2, Condition.gas)
+      Stage.So2 = CP.PropsSI("S","T",Stage.To2, "P", Stage.Po2, Condition.gas)
+      
       
       (Stage.Ts2, Stage.Ps2) = Aux.stagnation_to_static(Stage.To2, Stage.Po2, Stage.C2, Condition.gas)
       Stage.rho2 = CP.PropsSI("D","T",Stage.Ts2,"P",Stage.Ps2, Condition.gas)
       
       # Station 2 update
-      Cr2_update = Condition.mdot/(pi*Stage.D2*Stage.Vane_depth*Stage.rho2)
-      Stage = self.impeller_outlet_state_calculation(Condition, Design, Stage, Cr2_update)
+      Cr2_update = Condition.mdot/(pi*Geo.D2*Geo.Vane_depth*Stage.rho2)
+      Stage, Geo = self.impeller_outlet_state_calculation(Condition, Design, Stage, Geo, Cr2_update, "design")
       
       Stage.Ho3 = Stage.Ho2
       Stage.Po3 = CP.PropsSI("P","H",Stage.Ho3-Stage.loss_total,"S",Stage.So1,Condition.gas)
       Stage.So3 = CP.PropsSI("S","H",Stage.Ho3,"P",Stage.Po3,Condition.gas)
       Stage.To3 = CP.PropsSI("T","H",Stage.Ho3,"P",Stage.Po3,Condition.gas)
       
-      Stage.Diffuser_depth = Stage.Vane_depth*Design.bstar 
-      Stage.D2i = Stage.D2*Design.ratio_imp_dif 
-      Stage.D3 = Stage.D2i*Design.ratio_dif_in_out
+      Geo.Diffuser_depth = Geo.Vane_depth*Design.bstar
+      Geo.D2i = Geo.D2*Design.ratio_imp_dif 
+      Geo.D3 = Geo.D2i*Design.ratio_dif_in_out
       
       b = 1
       
       C3_iter = Stage.C3
       while b:
-        Stage.Cr3 = Condition.mdot/(pi*Stage.D3*Stage.Diffuser_depth*Design.ratio_dif_unblocked*Stage.rho3)
-        Stage.Cw3 = Stage.Cw2/Design.ratio_dif_in_out
-        Stage.C3 = sqrt(Stage.Cr3**2+Stage.Cw3**2)
-        (Stage.Ts3, Stage.Ps3) = Aux.stagnation_to_static(Stage.To3, Stage.Po3, Stage.C3, Condition.gas)
-        Stage.rho3 = CP.PropsSI("D","T",Stage.Ts3, "P", Stage.Ps3, Condition.gas)
-        
+        Stage.Cr3 = Condition.mdot/(pi*Geo.D3*Geo.Diffuser_depth*Design.ratio_dif_unblocked*Stage.rho3)
+        Stage = self.diffuser_inlet_state_calculation(Condition, Design, Stage, Stage.Cr3)
         err_C3 = abs((C3_iter-Stage.C3)/Stage.C3)
         C3_iter = Stage.C3
-        
+  
         if err_C3 < 1.0e-4:
           b = 0
       
@@ -236,34 +230,138 @@ class Radial_comp:
       
       if err_C2 < 1.0e-4:
         a = 0
+        
+    return Stage, Geo
+  
+  def radial_compressor_off_design(self, Off_Condition, Design, Off_Stage, Geo):
+    Off_Stage.Po1 = Off_Condition.Po_in
+    Off_Stage.Ho1 = Off_Condition.Ho_in
+    Off_Stage.So1 = Off_Condition.So_in
+    
+    # Initial guess
+    Off_Stage.Cr1 = 4*Off_Condition.massflow/pi/(Stage.D1_tip**2-Design.D1_root**2)/Off_Stage.rho1
+    Off_Stage.Cw1 = Off_Stage.Cr1*tan(Stage.alpha1*pi/180)
+    Off_Stage.C1 = sqrt(Off_Stage.Cr1**2+Off_Stage.Cw1**2)
+    
+    Off_Stage.U1 = 2*pi*Off_Condition.rpm/60*Off_Stage.D1/2
+    Off_Stage.U1_hub = 2*pi*Off_Condition.rpm/60*Design.D1_root/2
+    Off_Stage.U1_tip = 2*pi*Off_Condition.rpm/60*Off_Stage.D1_tip/2
+    
+    print('****************************************')
+    a = 1
+    iter_Cr1 = Off_Stage.Cr1
+    n_c1 = 0
+    while a:
+      [Off_Stage.Ts1, Off_Stage.Ps1] = Aux.stagnation_to_static(Off_Stage.To1,Off_Stage.Po1,Off_Stage.C1,Condition.gas)
+      Off_Stage.rho1 = CP.PropsSI("D","T",Off_Stage.Ts1,"P", Off_Stage.Ps1, Off_Condition.gas)
       
-  def impeller_outlet_state_calculation(self, Condition, Design, Stage, Cr2):
-    Stage.Cr2 = Cr2 # Initial Assumption of outlet axial velocity
-    Stage.del_H = Stage.Ho2 - Stage.Ho1
+      Off_Stage.Cr1 = 4*Off_Condition.massflow/pi/(Geo.D1_tip**2-Design.D1_root**2)/Off_Stage.rho1
+      Off_Stage, Geo = self.impeller_inlet_state_calculation(Off_Condition, Design, Off_Stage, Geo, Off_Stage.Cr1, "off-design")
+      err_Cr1 = abs(iter_Cr1-Off_Stage.Cr1)/Off_Stage.Cr1
+      iter_Cr1 = Off_Stage.Cr1
+      n_c1 = n_c1+1
+      print('[Cr1 Calculation Stage]   No_iter: %.3f   err_iter: %.3f' %(n_c1, err_Cr1))
+      if err_Cr1 < 1.0e-4:
+        a = 0
     
-    a = Stage.Slip_Factor
-    b = -Stage.Cr2*tan(Design.BackSwept_beta*pi/180)
-    c = -Stage.del_H-Stage.U1*Stage.Cw1
+    Off_Stage.U2 = (2*pi*Off_Condition.rpm/60)*Geo.D2/2
+    n_c2 = 0
+    iter_Cr2 = Off_Condition.massflow/pi/Geo.D2/Geo.Vane_depth/Off_Stage.rho2
+    b = 1
+    while b:
+      Off_Stage = self.radial_compressor_loss(Condition, Design, Off_Stage, Geo)
+      Off_Stage.Ho2 = Off_Stage.Ho1+Off_Stage.U2*Off_Stage.Cw2 - Off_Stage.U1*Off_Stage.Cw1
+      Off_Stage.Po2 = CP.PropsSI("P","H",Off_Stage.Ho2-Off_Stage.loss_internal,"S",Off_Stage.So1, Off_Condition.gas)
+      Off_Stage.To2 = CP.PropsSI("T","P",Off_Stage.Po2,"H",Off_Stage.Ho2, Off_Condition.gas)
+      Off_Stage.So2 = CP.PropsSI("S","T",Off_Stage.To2, "P", Off_Stage.Po2, Off_Condition.gas)
+      [Off_Stage.Ts2, Off_Stage.Ps2] = Aux.stagnation_to_static(Off_Stage.To2, Off_Stage.Po2, Off_Stage.C2, Off_Condition.gas)
+      Off_Stage.rho2 = CP.PropsSI("D","T",Off_Stage.Ts2, "P", Off_Stage.Ps2, Off_Condition.gas)
+      Off_Stage.Cr2 = Off_Condition.massflow/pi/Geo.D2/Geo.Vane_depth/Off_Stage.rho2
+      
+      Off_Stage, Geo = self.impeller_outlet_state_calculation(Off_Condition, Design, Off_Stage, Geo, Off_Stage.Cr2, "off-design")
+      
+      Off_Stage.Ho3 = Off_Stage.Ho2
+      Off_Stage.Po3 = CP.PropsSI("P","H",Off_Stage.Ho2-Off_Stage.loss_total,"S",Off_Stage.So1,Off_Condition.gas)
+      Off_Stage.To3 = CP.PropsSI("T","H",Off_Stage.Ho3,"P",Off_Stage.Po3,Off_Condition.gas)
+      Off_Stage.So3 = CP.PropsSI("S","T",Off_Stage.To3, "P", Off_Stage.Po3, Off_Condition.gas)
+      
+      c = 1
+      n_c3 = 0
+      iter_C3 = Off_Stage.C3
+      while c:
+        Off_Stage.Cr3 = Off_Condition.massflow/pi/Geo.D3/Geo.Diffuser_depth/Design.ratio_dif_thickness/Off_Stage.rho3
+        Off_Stage = self.diffuser_inlet_state_calculation(Off_Condition, Design, Off_Stage, Off_Stage.Cr3)
+        
+        err_C3 = abs(iter_C3-Off_Stage.C3)/Off_Stage.C3
+        iter_C3 = Off_Stage.C3
+        n_c3 = n_c3+1
+        print('[C3 Calculation Stage]   No_iter: %.3f   err_iter: %.3f' %(n_c3, err_C3))
+        if err_C3 < 1.0e-4:
+          c = 0
+      
+      err_Cr2 = abs(iter_Cr2-Off_Stage.Cr2)/Off_Stage.Cr2
+      iter_Cr2 = Off_Stage.Cr2
+      n_c2 = n_c2+1
+      print('[Cr2 Calculation Stage]   No_iter: %.3f   err_iter: %.3f' %(n_c2, err_Cr2))
+      
+    return Stage, Geo
+      
+  def impeller_inlet_state_calculation(self, Condition, Design, Stage, Geo, Cr1, mode):
+    Stage.Cw1 = Cr1*tan(Design.alpha1*pi/180)
+    Stage.C1 = sqrt(Cr1**2+Stage.Cw1**2)
     
-    Stage.U2 = (-b+sqrt(b**2-4*a*c))/2/a
-    Stage.Cw2 = Stage.U2*Stage.Slip_Factor - Stage.Cr2*tan(Design.BackSwept_beta*pi/180)
-    Stage.C2 = sqrt(Stage.Cw2**2+Stage.Cr2**2)
-    Stage.alpha2 = 180/pi*atan(Stage.Cw2/Stage.Cr2)
+    if mode == 'design':
+      (Stage.Ts1, Stage.Ps1) = Aux.stagnation_to_static(Stage.To1, Stage.Po1, Stage.C1, Condition.gas)
+      Stage.rho1 = CP.PropsSI("D","T",Stage.Ts1,"P",Stage.Ps1, Condition.gas)
+      Geo.D1_tip = sqrt(Design.D1_root**2+4*Condition.mdot/(pi*Stage.rho1*Stage.Cr1))
+      Geo.D1 = (Design.D1_root+Geo.D1_tip)/2  
+      
+      Stage.U1 = Geo.D1/2*Condition.rpm/60*2*pi
+      Stage.U1_hub = Design.D1_root/2*Condition.rpm/60*2*pi
+      Stage.U1_tip = Geo.D1_tip/2*Condition.rpm/60*2*pi
     
-    Stage.Wr2 = Stage.Cr2
+    Stage.Ww1 = Stage.U1 - Stage.Cw1
+    Stage.W1_tip = sqrt(Stage.Cr1**2+(Stage.U1_tip-Stage.Cw1)**2)
+    Stage.W1_hub = sqrt(Stage.Cr1**2+(Stage.U1_hub-Stage.Cw1)**2)
+    
+    return Stage, Geo
+      
+  def impeller_outlet_state_calculation(self, Condition, Design, Stage, Geo, Cr2, mode):
+    if mode == "design":
+      Stage.del_H = Stage.Ho2 - Stage.Ho1
+      a = Geo.Slip_Factor
+      b = -Cr2*tan(Design.BackSwept_beta*pi/180)
+      c = -Stage.del_H-Stage.U1*Stage.Cw1
+      Stage.U2 = (-b+sqrt(b**2-4*a*c))/2/a
+      
+    Stage.Cw2 = Stage.U2*Geo.Slip_Factor - Cr2*tan(Design.BackSwept_beta*pi/180)
+    Stage.C2 = sqrt(Stage.Cw2**2+Cr2**2)
+    Stage.alpha2 = 180/pi*atan(Stage.Cw2/Cr2)
+    
+    Stage.Wr2 = Cr2
     Stage.Ww2 = Stage.U2-Stage.Cw2
     Stage.W2 = sqrt(Stage.Wr2**2+Stage.Ww2**2)
-    
+        
     (Stage.Ts2, Stage.Ps2) = Aux.stagnation_to_static(Stage.To2,Stage.Po2,Stage.C2,Condition.gas)
     Stage.rho2 = CP.PropsSI("D","T",Stage.Ts2,"P",Stage.Ps2,Condition.gas)
     Stage.mu2 = CP.PropsSI("V","T",Stage.Ts2,"P",Stage.Ps2,Condition.gas)
-    Stage.D2 = 2*Stage.U2/(2*pi*Condition.rpm/60)
-    Stage.Vane_depth = Condition.mdot/(Stage.rho2*Stage.Cr2)/(pi*Stage.D2) 
-    # Flow area = impeller exit circumference*Vane depth
+    
+    if mode == "design":  
+      Geo.D2 = 2*Stage.U2/(2*pi*Condition.rpm/60)  
+      Geo.Vane_depth = Condition.mdot/(Stage.rho2*Cr2)/(pi*Geo.D2) 
+      # Flow area = impeller exit circumference*Vane depth
+    
+    return Stage, Geo
+  
+  def diffuser_inlet_state_calculation(self, Condition, Design, Stage, Cr3):
+    Stage.Cw3 = Stage.Cw2/Design.ratio_dif_in_out
+    Stage.C3 = sqrt(Cr3**2+Stage.Cw3**2)
+    (Stage.Ts3, Stage.Ps3) = Aux.stagnation_to_static(Stage.To3, Stage.Po3, Stage.C3, Condition.gas)
+    Stage.rho3 = CP.PropsSI("D","T",Stage.Ts3,"P",Stage.Ps3,Condition.gas)
     
     return Stage
-      
-  def radial_compressor_loss(self, Condition, Design, Stage):
+  
+  def radial_compressor_loss(self, Condition, Design, Stage, Geo):
     #---------- Internal loss models ----------#
     
     if Design.Loss_incidence == 1:
@@ -276,27 +374,27 @@ class Radial_comp:
     if Design.Loss_blade_loading == 1:
       # Coppage
       ratio_W = Stage.W2/Stage.W1_tip
-      ratio_D = Stage.D1_tip/Stage.D2
-      Stage.Df = 1-ratio_W+ratio_W*0.75*Stage.del_H/Stage.U2**2/(Design.n_vane/pi*(1-ratio_D)+2*ratio_D)
-      Stage.loss_bladeloading = Design.Blade_loading_tune*(0.05*Stage.Df**2*Stage.U2**2)
+      ratio_D = Geo.D1_tip/Geo.D2
+      Df = 1-ratio_W+ratio_W*0.75*Stage.del_H/Stage.U2**2/(Design.n_vane/pi*(1-ratio_D)+2*ratio_D)
+      Stage.loss_bladeloading = Design.Blade_loading_tune*(0.05*Df**2*Stage.U2**2)
     else:
       Stage.loss_bladeloading = 0
       
     if Design.Loss_skin_friction == 1:
       # Jansen
       Cf = 0.005
-      Stage.Lb = Stage.D1_tip/2+Stage.D2-Design.D1_root
-      Stage.Dh = pi*(Stage.D1_tip**2-Design.D1_root**2)/(pi*(Design.D1_root+Stage.D1_tip)+2*Design.n_vane*(Stage.D1_tip-Design.D1_root))
+      Lb = Geo.D1_tip/2+Geo.D2-Design.D1_root
+      Dh = pi*(Geo.D1_tip**2-Design.D1_root**2)/(pi*(Design.D1_root+Geo.D1_tip)+2*Design.n_vane*(Geo.D1_tip-Design.D1_root))
       W_bar = (Stage.Cw1+Stage.C2+Stage.W1_tip+2*Stage.W1_hub+3*Stage.W2)/8
-      Stage.loss_skinfriction = Design.Skin_friction_tune*(2*Cf*Stage.Lb/Stage.Dh*W_bar**2)
+      Stage.loss_skinfriction = Design.Skin_friction_tune*(2*Cf*Lb/Dh*W_bar**2)
     else:
       Stage.loss_skinfriction = 0
     
     if Design.Loss_clearance == 1:
       # Jansen
-      C1c = 0.6*Design.Clearance/Stage.Vane_depth*Stage.Cw2
-      C2c = (Stage.D1_tip**2-Design.D1_root**2)/(Stage.D2-Stage.D1_tip)/(1+Stage.rho2/Stage.rho1)
-      C3c = sqrt(2*pi/Stage.Vane_depth/Design.n_vane*Stage.Cw2*Stage.Cr1*C2c)
+      C1c = 0.6*Design.Clearance/Geo.Vane_depth*Stage.Cw2
+      C2c = (Geo.D1_tip**2-Design.D1_root**2)/(Geo.D2-Geo.D1_tip)/(1+Stage.rho2/Stage.rho1)
+      C3c = sqrt(2*pi/Geo.Vane_depth/Design.n_vane*Stage.Cw2*Stage.Cr1*C2c)
       Stage.loss_clearance = Design.Clearance_tune * (C1c*C3c)
     else:
       Stage.loss_clearance = 0
@@ -312,32 +410,32 @@ class Radial_comp:
     
     #---------- External loss models ----------#
     if Design.Loss_disk_friction == 1:
-      Re_df = Stage.rho2*Stage.U2*Stage.D2/2/Stage.mu2
+      Re_df = Stage.rho2*Stage.U2*Geo.D2/2/Stage.mu2
       if Re_df > 3.0e5:
         f_df = 0.0622/Re_df**0.2
       else:
         f_df = 2.67/Re_df**0.5
       
-      Stage.loss_diskfriction = Design.Disk_friction_tune*(f_df*0.5*(Stage.rho1+Stage.rho2)*Stage.D2**2*Stage.U2**3/16/Condition.mdot)
+      Stage.loss_diskfriction = Design.Disk_friction_tune*(f_df*0.5*(Stage.rho1+Stage.rho2)*Geo.D2**2*Stage.U2**3/16/Condition.mdot)
     else:
       Stage.loss_diskfriction = 0
       
     # Recirculation loss <Oh et al.>    
     if Design.Loss_recirculation == 1:
       ratio_W = Stage.W2/Stage.W1_tip
-      ratio_D = Stage.D1_tip/Stage.D2
-      Stage.Df = 1-ratio_W+ratio_W*0.75*Stage.del_H/Stage.U2**2/(Design.n_vane/pi*(1-ratio_D)+2*ratio_D)
-      Stage.loss_recirculation = Design.Recirculation_tune * (2e-5*sinh(3.5*(Stage.alpha2/180*pi)**3)*Stage.Df**2*Stage.U2**2)
+      ratio_D = Geo.D1_tip/Geo.D2
+      Df = 1-ratio_W+ratio_W*0.75*Stage.del_H/Stage.U2**2/(Design.n_vane/pi*(1-ratio_D)+2*ratio_D)
+      Stage.loss_recirculation = Design.Recirculation_tune * (2e-5*sinh(3.5*(Stage.alpha2/180*pi)**3)*Df**2*Stage.U2**2)
     else:
       Stage.loss_recirculation = 0
     
     if Design.Loss_leakage == 1:
-      Stage.Lb = Stage.D1_tip/2+Stage.D2-Design.D1_root
-      r_bar = (Stage.D2+Stage.D1_tip)/4
-      b_bar = (Stage.D1_tip-Design.D1_root+Stage.Vane_depth)/2
-      del_Pcl = Condition.mdot/2*(Stage.D2*Stage.Cw2-Stage.D1_tip*Stage.Cw1)/Design.n_vane/r_bar/b_bar/Stage.Lb
+      Lb = Geo.D1_tip/2+Geo.D2-Design.D1_root
+      r_bar = (Geo.D2+Geo.D1_tip)/4
+      b_bar = (Geo.D1_tip-Design.D1_root+Geo.Vane_depth)/2
+      del_Pcl = Condition.mdot/2*(Geo.D2*Stage.Cw2-Geo.D1_tip*Stage.Cw1)/Design.n_vane/r_bar/b_bar/Lb
       Ucl = 0.816*sqrt(2*del_Pcl/Stage.rho2)
-      mdot_cl = Stage.rho2*Design.n_vane*Design.Clearance*Stage.Lb*Ucl
+      mdot_cl = Stage.rho2*Design.n_vane*Design.Clearance*Lb*Ucl
       Stage.loss_leakage = Design.Leakage_tune*mdot_cl*Ucl*Stage.U2/2/Condition.mdot
     else:
       Stage.loss_leakage = 0
@@ -345,7 +443,6 @@ class Radial_comp:
     if Design.Loss_windage == 1:
       P_windage = 1.379e+6
       rho_max = CP.PropsSI("D","T", 320, "P", P_windage, Condition.gas)
-      Re_r = Design.rotor_r*(Design.rotor_gap*rho_max*Condition.rpm/60)/Design.mu
       Cd = 0.0030818
       Stage.loss_windage = Design.Windage_tune*(pi*Cd*rho_max*Design.rotor_r**4*(Condition.rpm*2*pi/60)**3*Design.rotor_length)
     else:
@@ -361,7 +458,7 @@ class Radial_comp:
     Stage.loss_total = Stage.loss_internal + Stage.loss_external
     
     return Stage
-    
+  
 class Aux:
   @staticmethod
   def static_to_stagnation(Ts, Ps, v, gas, method="h"):
@@ -501,5 +598,4 @@ if __name__ == '__main__':
   Design.BackSwept_beta = 50 # Backswept angle (degree): meridional corodinator
   
   Test_comp = Radial_comp(Condition, Design)
-  Test_comp()
-  
+  Stage = Test_comp()

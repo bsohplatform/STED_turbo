@@ -9,3 +9,6 @@ class Def_Design:
   
 class Def_Stage:
   a: float = 0
+  
+class Def_Geo:
+  a: float = 0
