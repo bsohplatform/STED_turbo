@@ -12,3 +12,6 @@ class Def_Stage:
   
 class Def_Geo:
   a: float = 0
+  
+class Def_Plot:
+  a: float = 0

@@ -10,6 +10,7 @@ from copy import *
 class Radial_comp:
   def __init__(self, Condition, Design, Plot):
     self.Condition = Condition
+    self.Off_Condition = deepcopy(Condition)
     self.Design = Design
     self.Plot = Plot
     
@@ -22,11 +23,10 @@ class Radial_comp:
                                     'eff': [70, 80, 90, 95, 90, 80, 70]})
     
   def __call__(self):
-    
-    
+    self.Plot.PR_plot = []
+    self.Plot.T2T_eff_plot = []
     Fluid_in = Def_Condition()
     Fluid_out = Def_Condition()
-    off_condition = Def_Condition()
     
     Fluid_in.T = self.Condition.To_in
     Fluid_in.p = self.Condition.Po_in
@@ -42,23 +42,40 @@ class Radial_comp:
     (rpm_tune, dia_tune, tip_tune, ns_tune, ds_tune, H_ad) = self.nsds_conversion(Fluid_in, Fluid_out, ns)
     
     self.Condition.rpm = rpm_tune
-    a = 1
+  
+    mdot_list = [(self.Plot.mdot_plot_lb+(self.Plot.mdot_plot_ub-self.Plot.mdot_plot_lb)/self.Plot.mdot_num_range*n)*self.Condition.mdot for n in range(self.Plot.mdot_num_range)]
+    rpm_list = [(self.Plot.rpm_plot_lb+(self.Plot.rpm_plot_ub-self.Plot.rpm_plot_lb)/self.Plot.rpm_num_range*n)*self.Condition.rpm//10*10 for n in range(self.Plot.rpm_num_range)]
     
-    mdot_list = [self.Plot.mdot_ratio_lb+(self.Plot.mdot_ratio_ub-self.Plot.mdot_ratio_lb)/self.Plot.mdot_num_range*n for n in range(self.Plot.mdot_num_range)]
-    rpm_list = [self.Plot.rpm_ratio_lb+(self.Plot.rpm_ratio_ub-self.Plot.rpm_ratio_lb)/self.Plot.rpm_num_range*n for n in range(self.Plot.rpm_num_range)]
+    mdot_list.append(self.Condition.mdot)
+    self.Plot.mdot_list = list(set(mdot_list))
+    self.Plot.mdot_list.sort()
+    
+    rpm_list.append(self.Condition.rpm)
+    self.Plot.rpm_list = list(set(rpm_list))
+    self.Plot.rpm_list.sort()
+    
     
     for n in range(self.Design.n_stage):
       if n == 0:
+        self.Condition.Ho_in = CP.PropsSI("H","T",self.Condition.To_in,"P",self.Condition.Po_in, self.Condition.gas)
+        self.Condition.So_in = CP.PropsSI("S","T",self.Condition.To_in,"P",self.Condition.Po_in, self.Condition.gas)
+        self.Condition.Ho_out_ideal = CP.PropsSI("H","P",self.Condition.Po_out, "S",self.Condition.So_in, self.Condition.gas)
+
         self.Preprocess(self.Condition, self.Design)
         Stage, Geo = self.radial_compressor_design_initialization(self.Condition, self.Design, self.Design.P_ratio_vec[n])
         Stage, Geo = self.radial_compressor_convergence(self.Condition, self.Design, Stage, Geo)
         
-        for rpm in rpm_list:
-          for mdot in mdot_list:
-            off_condition.rpm = rpm*self.Condition.rpm
-            off_condition.mdot = rpm*mdot*self.Condition.rpm
-            Stage, Geo
-
+        Off_Stage = deepcopy(Stage)
+        for rpm in self.Plot.rpm_list:
+          for mdot in self.Plot.mdot_list:
+            self.Off_Condition.rpm = rpm
+            self.Off_Condition.mdot = mdot*rpm/self.Condition.rpm
+            Off_Stage = self.radial_compressor_off_design(self.Off_Condition, self.Design, Off_Stage, Geo)
+            self.Off_Condition.Ho_out_ideal = CP.PropsSI("H","P",Off_Stage.Po3,"S",Off_Stage.So1, self.Off_Condition.gas)
+            self.Plot.PR_plot.append(Off_Stage.Po3/Off_Stage.Po1)
+            t2t_eff = (self.Off_Condition.Ho_out_ideal-Off_Stage.Ho1)/(Off_Stage.Ho3-Off_Stage.Ho1)
+            self.Plot.T2T_eff_plot.append(t2t_eff)
+            
         
   #def nsds_finding_com(Condition, Design):
   #  Condition.        
@@ -113,12 +130,6 @@ class Radial_comp:
     return ds, eff, err_code
       
   def Preprocess(self, Condition, Design):
-    # Turbomachinery Boundary Condition
-    Condition.Ho_in = CP.PropsSI("H","T",Condition.To_in,"P",Condition.Po_in, Condition.gas)
-    Condition.So_in = CP.PropsSI("S","T",Condition.To_in,"P",Condition.Po_in, Condition.gas)
-    Condition.Ho_out_ideal = CP.PropsSI("H","P",Condition.Po_out, "S",Condition.So_in, Condition.gas)
-    
-    
     # Check if Ca brings the static condition below saturation Design
     try:
       (Check_Ts, Check_Ps) = Aux.stagnation_to_static(Condition.To_in, Condition.Po_in, Design.Ca, Condition.gas)
@@ -233,19 +244,15 @@ class Radial_comp:
         
     return Stage, Geo
   
-  def radial_compressor_off_design(self, Off_Condition, Design, Off_Stage, Geo):
-    Off_Stage.Po1 = Off_Condition.Po_in
-    Off_Stage.Ho1 = Off_Condition.Ho_in
-    Off_Stage.So1 = Off_Condition.So_in
-    
+  def radial_compressor_off_design(self, Off_Condition, Design, Off_Stage, Geo):    
     # Initial guess
-    Off_Stage.Cr1 = 4*Off_Condition.massflow/pi/(Stage.D1_tip**2-Design.D1_root**2)/Off_Stage.rho1
-    Off_Stage.Cw1 = Off_Stage.Cr1*tan(Stage.alpha1*pi/180)
+    Off_Stage.Cr1 = 4*Off_Condition.mdot/pi/(Geo.D1_tip**2-Design.D1_root**2)/Off_Stage.rho1
+    Off_Stage.Cw1 = Off_Stage.Cr1*tan(Design.alpha1*pi/180)
     Off_Stage.C1 = sqrt(Off_Stage.Cr1**2+Off_Stage.Cw1**2)
     
-    Off_Stage.U1 = 2*pi*Off_Condition.rpm/60*Off_Stage.D1/2
+    Off_Stage.U1 = 2*pi*Off_Condition.rpm/60*Geo.D1/2
     Off_Stage.U1_hub = 2*pi*Off_Condition.rpm/60*Design.D1_root/2
-    Off_Stage.U1_tip = 2*pi*Off_Condition.rpm/60*Off_Stage.D1_tip/2
+    Off_Stage.U1_tip = 2*pi*Off_Condition.rpm/60*Geo.D1_tip/2
     
     print('****************************************')
     a = 1
@@ -255,7 +262,7 @@ class Radial_comp:
       [Off_Stage.Ts1, Off_Stage.Ps1] = Aux.stagnation_to_static(Off_Stage.To1,Off_Stage.Po1,Off_Stage.C1,Condition.gas)
       Off_Stage.rho1 = CP.PropsSI("D","T",Off_Stage.Ts1,"P", Off_Stage.Ps1, Off_Condition.gas)
       
-      Off_Stage.Cr1 = 4*Off_Condition.massflow/pi/(Geo.D1_tip**2-Design.D1_root**2)/Off_Stage.rho1
+      Off_Stage.Cr1 = 4*Off_Condition.mdot/pi/(Geo.D1_tip**2-Design.D1_root**2)/Off_Stage.rho1
       Off_Stage, Geo = self.impeller_inlet_state_calculation(Off_Condition, Design, Off_Stage, Geo, Off_Stage.Cr1, "off-design")
       err_Cr1 = abs(iter_Cr1-Off_Stage.Cr1)/Off_Stage.Cr1
       iter_Cr1 = Off_Stage.Cr1
@@ -266,7 +273,7 @@ class Radial_comp:
     
     Off_Stage.U2 = (2*pi*Off_Condition.rpm/60)*Geo.D2/2
     n_c2 = 0
-    iter_Cr2 = Off_Condition.massflow/pi/Geo.D2/Geo.Vane_depth/Off_Stage.rho2
+    iter_Cr2 = Off_Condition.mdot/pi/Geo.D2/Geo.Vane_depth/Off_Stage.rho2
     b = 1
     while b:
       Off_Stage = self.radial_compressor_loss(Condition, Design, Off_Stage, Geo)
@@ -276,7 +283,7 @@ class Radial_comp:
       Off_Stage.So2 = CP.PropsSI("S","T",Off_Stage.To2, "P", Off_Stage.Po2, Off_Condition.gas)
       [Off_Stage.Ts2, Off_Stage.Ps2] = Aux.stagnation_to_static(Off_Stage.To2, Off_Stage.Po2, Off_Stage.C2, Off_Condition.gas)
       Off_Stage.rho2 = CP.PropsSI("D","T",Off_Stage.Ts2, "P", Off_Stage.Ps2, Off_Condition.gas)
-      Off_Stage.Cr2 = Off_Condition.massflow/pi/Geo.D2/Geo.Vane_depth/Off_Stage.rho2
+      Off_Stage.Cr2 = Off_Condition.mdot/pi/Geo.D2/Geo.Vane_depth/Off_Stage.rho2
       
       Off_Stage, Geo = self.impeller_outlet_state_calculation(Off_Condition, Design, Off_Stage, Geo, Off_Stage.Cr2, "off-design")
       
@@ -289,7 +296,7 @@ class Radial_comp:
       n_c3 = 0
       iter_C3 = Off_Stage.C3
       while c:
-        Off_Stage.Cr3 = Off_Condition.massflow/pi/Geo.D3/Geo.Diffuser_depth/Design.ratio_dif_thickness/Off_Stage.rho3
+        Off_Stage.Cr3 = Off_Condition.mdot/pi/Geo.D3/Geo.Diffuser_depth/Design.ratio_dif_unblocked/Off_Stage.rho3
         Off_Stage = self.diffuser_inlet_state_calculation(Off_Condition, Design, Off_Stage, Off_Stage.Cr3)
         
         err_C3 = abs(iter_C3-Off_Stage.C3)/Off_Stage.C3
@@ -303,8 +310,11 @@ class Radial_comp:
       iter_Cr2 = Off_Stage.Cr2
       n_c2 = n_c2+1
       print('[Cr2 Calculation Stage]   No_iter: %.3f   err_iter: %.3f' %(n_c2, err_Cr2))
+      if err_Cr2 < 1.0e-4:
+        b = 0
       
-    return Stage, Geo
+      
+    return Off_Stage
       
   def impeller_inlet_state_calculation(self, Condition, Design, Stage, Geo, Cr1, mode):
     Stage.Cw1 = Cr1*tan(Design.alpha1*pi/180)
@@ -544,6 +554,7 @@ class Aux:
 if __name__ == '__main__':
   Condition = Def_Condition()
   Design = Def_Design()
+  Plot = Def_Plot()
   
   Condition.gas = "R245fa"
   Condition.mdot = 5  # kg/sec
@@ -597,5 +608,12 @@ if __name__ == '__main__':
   Design.alpha1 = 30 # Inlet guide vane angle (degree)
   Design.BackSwept_beta = 50 # Backswept angle (degree): meridional corodinator
   
-  Test_comp = Radial_comp(Condition, Design)
+  Plot.mdot_plot_lb = 0.9
+  Plot.mdot_plot_ub = 1.1
+  Plot.rpm_plot_lb = 0.9
+  Plot.rpm_plot_ub = 1.1
+  Plot.mdot_num_range = 3
+  Plot.rpm_num_range = 3
+  
+  Test_comp = Radial_comp(Condition, Design, Plot)
   Stage = Test_comp()
