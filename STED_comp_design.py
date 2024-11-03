@@ -283,22 +283,6 @@ class Radial_comp:
     n_c2 = 0
     iter_Cr2 = Off_Condition.mdot/pi/Geo.D2/Geo.Vane_depth/Off_Stage.rho2
     b = 1
-    #--------------------------------------------------
-    Off_Stage, Geo = self.impeller_outlet_state_calculation(Off_Condition, Design, Off_Stage, Geo, iter_Cr2, "off-design")
-    Off_Stage.Ho2 = Off_Stage.Ho1+Off_Stage.U2*Off_Stage.Cw2 - Off_Stage.U1*Off_Stage.Cw1
-    Off_Stage.Po2 = CP.PropsSI("P","H",Off_Stage.Ho2,"S",Off_Stage.So1, Off_Condition.gas)
-    Off_Stage.To2 = CP.PropsSI("T","P",Off_Stage.Po2,"H",Off_Stage.Ho2, Off_Condition.gas)
-    Off_Stage.del_H = Off_Stage.Ho2 - Off_Stage.Ho1
-    [Off_Stage.Ts2, Off_Stage.Ps2] = Aux.stagnation_to_static(Off_Stage.To2, Off_Stage.Po2, Off_Stage.C2, Off_Condition.gas)
-    Off_Stage.rho2 = CP.PropsSI("D","T",Off_Stage.Ts2,"P",Off_Stage.Ps2,Off_Condition.gas)
-    Off_Stage.mu2 = CP.PropsSI("V","T",Off_Stage.Ts2,"P",Off_Stage.Ps2,Off_Condition.gas)
-    
-    Off_Stage.Ho3 = Off_Stage.Ho2
-    Off_Stage.Po3 = Off_Stage.Po2
-    Off_Stage.To3 = CP.PropsSI("T","P",Off_Stage.Po3,"H",Off_Stage.Ho3,Off_Condition.gas)
-    (Off_Stage.Ts3, Off_Stage.Ps3) = Aux.stagnation_to_static(Off_Stage.To3, Off_Stage.Po3, Off_Stage.C3, Off_Condition.gas)
-    Off_Stage.rho3 = CP.PropsSI("D","T",Off_Stage.Ts3,"P",Off_Stage.Ps3,Off_Condition.gas)
-    #--------------------------------------------------
     while b:
       Off_Stage, Geo = self.radial_compressor_loss(Off_Condition, Design, Off_Stage, Geo, "off-design")
       Off_Stage.Ho2 = Off_Stage.Ho1+Off_Stage.U2*Off_Stage.Cw2 - Off_Stage.U1*Off_Stage.Cw1
